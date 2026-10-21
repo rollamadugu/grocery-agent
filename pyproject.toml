@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "grocery-agent"
+version = "0.1.0"
+description = "AI-assisted grocery shopping agent: parse a natural-language list, match products, and compute the lowest-cost split across retailers with a MILP optimizer."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Krishnasai Rollamadugu" }]
+dependencies = ["pulp==2.8.0", "fastapi", "uvicorn[standard]", "pydantic"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "httpx"]
+
+[tool.setuptools]
+packages = ["grocery_agent", "grocery_agent.retailers"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
