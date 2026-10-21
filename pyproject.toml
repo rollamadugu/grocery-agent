@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "Krishnasai Rollamadugu" }]
-dependencies = ["pulp==2.8.0", "fastapi", "uvicorn[standard]", "pydantic"]
+dependencies = ["pulp==2.8.0", "fastapi", "uvicorn[standard]", "pydantic", "playwright"]
 
 [project.optional-dependencies]
 dev = ["pytest>=7", "httpx"]

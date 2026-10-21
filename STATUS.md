@@ -23,16 +23,29 @@ _Concise status doc, updated as the project progresses._
 - Canonical list optimizes to a Flipkart+AmazonNow split, ₹1726 total,
   ₹48 saved vs the cheapest single retailer (synthetic data).
 
+## Done (Phase 2 — first LIVE web-UI integration)
+- **Playwright session layer** (`retailers/playwright_base.py`): persistent profile
+  (your own login reused), headed/headless, human-in-the-loop on CAPTCHA/bot walls,
+  no stealth/evasion, no password/OTP storage.
+- **Amazon.in web adapter** (`retailers/amazon_in.py`): reads REAL, visible search
+  results (name, price, URL) and normalizes pack size from the title. Honest
+  capabilities (search + price only; no cart). Blocked -> surfaced, not faked.
+- **Live pipeline + CLI** (`live.py`): real listings -> matching -> optimizer.
+  `python -m grocery_agent.live [--headed] "<list>"`.
+- **VERIFIED live:** read 16 genuine Amazon.in listings for "cooking oil / rice",
+  optimizer chose 3×1L oil + 2×5kg rice = Rs 1251 with real product URLs.
+
 ## Honest limitations / not done
-- **No live retailer data yet.** All listings are labeled synthetic fixtures.
-  Live integration is gated on a legitimate, ToS-permitted access path per
-  retailer (see README "Honest scope"). No scraping / anti-bot evasion.
-- **No cart automation yet.** The adapter interface exists; no live cart adapter
-  is implemented. Checkout will always remain manual.
-- Parser is rule-based (no LLM dependency in pricing/optimization); AI assist for
-  ambiguous matches is a future enhancement behind the matching seam.
+- **Only Amazon is a live adapter so far.** A true multi-retailer *split* needs
+  more live adapters; those are added only where permitted/feasible. BigBasket/
+  Flipkart next (expect some to be blocked by anti-bot — will be marked honestly).
+- Amazon search doesn't expose delivery/coupon economics reliably, so that
+  retailer's basket fees are conservative/approximate until read from a real cart.
+- **No cart automation yet.** Interface exists; checkout always stays manual.
+- Parser is rule-based; AI assist for ambiguous matches is a future seam (could use
+  local Ollama).
 
 ## Next step
-Phase 2: implement one real data source behind a capability-declaring adapter
-(evaluate official/affiliate APIs first), keeping every other adapter explicitly
-"not available" rather than mocked.
+Add a second live adapter (BigBasket or Flipkart web) behind the same seam;
+empirically record which portals cooperate vs. block. Then (only where supported)
+a verified cart-preparation step.
