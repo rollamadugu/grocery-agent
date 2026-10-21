@@ -13,7 +13,7 @@ from urllib.parse import quote_plus
 
 from ..models import Listing, Retailer, Unit
 from ..units import parse_measure
-from .base import Capabilities, RetailerAdapter
+from .base import Capabilities, RetailerAdapter, build_search_query
 from .playwright_base import (BotChallenge, browser_page, first_attr, longest_text,
                               looks_blocked, rupee_amount, wait_for_human)
 
@@ -79,7 +79,7 @@ class FlipkartAdapter(RetailerAdapter):
         return out
 
     def _q(self, item):
-        return " ".join(x for x in [item.brand or "", item.category.replace("_", " ")] if x)
+        return build_search_query(item)
 
     def search(self, item) -> List[Listing]:
         with browser_page(headless=self.headless) as page:

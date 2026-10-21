@@ -108,6 +108,19 @@ _Concise status doc, updated as the project progresses._
 - `instamart.in` identity: strong circumstantial evidence it's the rebranded
   standalone Instamart; not 100% ownership-confirmed.
 
+## Generic qualifier handling (no per-item rules)
+The AI handles product qualifiers GENERICALLY — there is no per-product code. The
+LLM parser extracts a `variant` = every distinguishing attribute the shopper stated
+(size, variety, style/form, scent...), copied from their words with obvious
+abbreviations expanded (e.g. "NB" -> "newborn"). `build_search_query()` searches
+brand + type + variant, and the LLM matcher keeps a candidate ONLY if it satisfies
+EVERY stated attribute (reasoning about meaning/synonyms), else excludes it.
+**Verified:** "huggies diapers NB tape style" -> searches "Huggies diapers newborn
+tape style" -> matcher keeps only the newborn TAPE Huggies and rejects Wonder Pants,
+Tape size-S, and pant-style XS (enforces size AND style). Design = broad-ish search
++ strict semantic filter; when the search flakes, the matcher returns no match
+(honest) rather than a wrong product. Same mechanism applies to any product.
+
 ## City / location model (current)
 - **City is OPTIONAL** overall. Amazon.in / Flipkart don't need it.
 - When given, it's applied to the quick-commerce portals: **Instamart** (headless,

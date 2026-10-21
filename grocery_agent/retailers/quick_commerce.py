@@ -21,7 +21,7 @@ from urllib.parse import quote_plus
 
 from ..models import Listing, Retailer, Unit
 from ..units import parse_measure
-from .base import Capabilities, RetailerAdapter
+from .base import Capabilities, RetailerAdapter, build_search_query
 from .playwright_base import (browser_page, js_scan, looks_blocked, needs_location,
                               price_inr, wait_for_human)
 
@@ -126,7 +126,7 @@ class _QuickCommerceAdapter(RetailerAdapter):
         return out
 
     def _q(self, item):
-        return " ".join(x for x in [item.brand or "", item.category.replace("_", " ")] if x)
+        return build_search_query(item)
 
     def search(self, item) -> List[Listing]:
         with browser_page(headless=self.headless) as page:
@@ -515,8 +515,7 @@ class InstamartAdapter(RetailerAdapter):
         return out
 
     def _q(self, item) -> str:
-        q = " ".join(x for x in [item.brand or "", item.category.replace("_", " ")] if x).strip()
-        return q or item.text
+        return build_search_query(item)
 
     @contextlib.contextmanager
     def _session(self):

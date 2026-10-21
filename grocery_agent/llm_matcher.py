@@ -24,21 +24,27 @@ from .models import Listing, Mode, ShoppingItem
 
 _MATCH_PROMPT = """You match grocery search results to a shopper's request. Be strict.
 
-Request:
-- product: %(product)s
-- category: %(category)s
+The shopper asked for:
+- full request: %(product)s
+- product type: %(category)s
 - brand required: %(brand)s
-- variant/notes: %(variant)s
+- required qualifiers (size / variety / style / form / scent): %(variant)s
 
 Candidates (index: product name):
 %(cands)s
 
-Return ONLY JSON: {"matches":[<indices of candidates that are the SAME product the shopper asked for>]}
-Rules:
-- Strict on product TYPE: e.g. "toor dal"/"arhar dal" match toor dal, but "moong dal",
-  "masoor dal", "chana", "urad" do NOT. Sunflower oil does not match coconut oil, etc.
-- If a brand is required, include only that brand.
-- Different PACK SIZES of the correct product still match (size is handled elsewhere).
+Return ONLY JSON: {"matches":[<indices of candidates that satisfy the request>]}
+
+Rules — apply GENERALLY by reasoning about the meaning of the words; do NOT rely on
+memorised product examples:
+- A candidate matches ONLY if it is the same product TYPE AND satisfies EVERY
+  qualifier the shopper stated (brand if required, and each size / variety /
+  style / form / scent). If it CONTRADICTS or clearly OMITS a stated qualifier,
+  exclude it.
+- Treat synonyms, abbreviations and regional names as equal when they mean the
+  same thing (reason it out from the words).
+- Differences in PACK SIZE / quantity are fine (handled elsewhere) UNLESS the
+  shopper gave a size/pack as a qualifier.
 - Include only clear matches; when unsure, exclude.
 """
 

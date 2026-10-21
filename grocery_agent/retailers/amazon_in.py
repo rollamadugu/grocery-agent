@@ -15,7 +15,7 @@ from urllib.parse import quote_plus
 
 from ..models import Listing, Unit
 from ..units import parse_measure
-from .base import Capabilities, RetailerAdapter
+from .base import Capabilities, RetailerAdapter, build_search_query
 from ..models import Retailer
 from .playwright_base import BotChallenge, browser_page, looks_blocked, wait_for_human
 
@@ -134,7 +134,7 @@ class AmazonIndiaAdapter(RetailerAdapter):
             return self._extract_on_page(page, query, category, brand, "amazon")
 
     def _query_for(self, item) -> str:
-        return " ".join(x for x in [item.brand or "", item.category.replace("_", " ")] if x)
+        return build_search_query(item)
 
     def search(self, item) -> List[Listing]:
         return self.search_text(self._query_for(item), item.category, item.brand or "")

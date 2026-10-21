@@ -29,20 +29,22 @@ OLLAMA_MODEL = os.environ.get("GROCERY_LLM_MODEL", "llama3.1:8b")
 _PROMPT = """You convert a grocery shopping list written in plain English (often \
 Indian groceries) into structured JSON. Return ONLY a JSON object of the form:
 {"items":[{"raw_text":"...","category":"snake_case_noun","brand":"Brand or null",\
-"quantity":<number>,"unit":"kg|g|l|ml|count","mode":"brand|best_value"}]}
+"variant":"qualifiers or null","quantity":<number>,"unit":"kg|g|l|ml|count",\
+"mode":"brand|best_value"}]}
 
-Rules:
-- category: a short snake_case canonical noun for the PRODUCT TYPE, brand removed.
-  Examples: "toor dal" -> "toor_dal"; "Daawat basmati rice" -> "rice";
-  "Parachute coconut oil" -> "coconut_oil"; "Park Avenue soap" -> "bath_soap".
+Rules (apply GENERALLY to any product; do not rely on memorised examples):
+- raw_text: echo the shopper's exact phrase for this item, unchanged.
+- category: a short snake_case canonical noun for the PRODUCT TYPE, with the brand
+  and any qualifiers removed (e.g. the type word(s) only).
 - brand: the brand if one is explicitly named, else null. If a brand is named set
   mode="brand"; otherwise mode="best_value".
-- quantity + unit = the TOTAL the user wants.
-  "10 kg rice" -> quantity 10, unit "kg". "10 soaps" -> 10, "count".
-  "2 L oil" -> 2, "l". "500 g dal" -> 500, "g".
-  If an item is counted (e.g. "3 packets") with no weight/volume given, use unit
-  "count" and that count as quantity. Do NOT guess a pack size.
-- One object per distinct product. Do not invent items that aren't in the list.
+- variant: EVERY distinguishing attribute the shopper stated that constrains which
+  product is acceptable — size, variety/type, style/form, scent/flavour, etc. —
+  copied from their words and with obvious abbreviations expanded to their full
+  form. Join into one short string. null if the shopper stated no qualifier.
+- quantity + unit = the TOTAL wanted. Weight/volume -> kg/g/l/ml; otherwise count.
+  Do NOT invent a pack size when none is given (use count).
+- One object per distinct product. Do not invent items not in the list.
 
 Shopping list: %s
 """
@@ -92,6 +94,9 @@ def _coerce_items(arr: list, fallback_text: str) -> List[ShoppingItem]:
         brand = it.get("brand")
         if not isinstance(brand, str) or brand.strip().lower() in ("", "null", "none"):
             brand = None
+        variant = it.get("variant")
+        if not isinstance(variant, str) or variant.strip().lower() in ("", "null", "none"):
+            variant = None
         mode = Mode.BRAND if (brand or str(it.get("mode", "")).lower() == "brand") \
             else Mode.BEST_VALUE
 
@@ -99,7 +104,7 @@ def _coerce_items(arr: list, fallback_text: str) -> List[ShoppingItem]:
             key=f"{cat}_{i}",
             text=str(it.get("raw_text") or fallback_text),
             category=cat, unit=unit, required_qty=req_qty,
-            mode=mode, brand=brand))
+            mode=mode, brand=brand, variant=variant))
     return items
 
 
