@@ -35,10 +35,18 @@ _Concise status doc, updated as the project progresses._
 - **VERIFIED live:** read 16 genuine Amazon.in listings for "cooking oil / rice",
   optimizer chose 3×1L oil + 2×5kg rice = Rs 1251 with real product URLs.
 
+## Live adapters — empirical per-portal status (verified by running them)
+- **Amazon.in** ✅ live — reads public search results (no login needed for prices).
+- **Flipkart** ✅ live — reads public search; dismisses the login modal; ₹-anchored
+  price extraction; pack size parsed from title/card.
+- **Blinkit** ⛔ location-walled — SPA shows nothing until a delivery location is set;
+  headless returns 0 and we report it honestly. May work **headed** once you set the
+  location; often blocked by anti-bot regardless.
+- **Instamart (Swiggy)** ⛔ location/login-walled — same story; 0 in headless, honest.
+- A real multi-retailer *split* now works across the portals that return data
+  (Amazon + Flipkart today).
+
 ## Honest limitations / not done
-- **Only Amazon is a live adapter so far.** A true multi-retailer *split* needs
-  more live adapters; those are added only where permitted/feasible. BigBasket/
-  Flipkart next (expect some to be blocked by anti-bot — will be marked honestly).
 - Amazon search doesn't expose delivery/coupon economics reliably, so that
   retailer's basket fees are conservative/approximate until read from a real cart.
 - **No cart automation yet.** Interface exists; checkout always stays manual.

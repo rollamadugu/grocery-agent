@@ -18,7 +18,16 @@ from .models import Listing, Retailer
 from .optimizer import optimize
 from .parser import parse_list
 from .retailers.amazon_in import AmazonIndiaAdapter
+from .retailers.flipkart import FlipkartAdapter
+from .retailers.quick_commerce import BlinkitAdapter, InstamartAdapter
 from .retailers.playwright_base import BotChallenge
+
+
+def default_adapters(headless: bool):
+    return [AmazonIndiaAdapter(headless=headless, max_results=8),
+            FlipkartAdapter(headless=headless, max_results=8),
+            BlinkitAdapter(headless=headless, max_results=8),
+            InstamartAdapter(headless=headless, max_results=8)]
 
 
 def run_live(text: str, headless: bool = True) -> None:
@@ -32,7 +41,7 @@ def run_live(text: str, headless: bool = True) -> None:
         print(f"  - {it.text}  [{it.category}, need {it.required_qty}{it.unit.value}, "
               f"{it.mode.value}{', brand=' + it.brand if it.brand else ''}]")
 
-    adapters = [AmazonIndiaAdapter(headless=headless, max_results=8)]
+    adapters = default_adapters(headless)
     all_listings: List[Listing] = []
     retailers: Dict[str, Retailer] = {}
 
@@ -69,8 +78,8 @@ def run_live(text: str, headless: bool = True) -> None:
         for a in b.assignments:
             print(f"   {a.item_key}: {a.packs} x {a.listing.name[:60]}  @Rs{a.listing.landed_item_price}")
             print(f"       {a.listing.url}")
-    print("\nNote: only Amazon is a live adapter today; multi-retailer split needs "
-          "more live adapters (added only where permitted/feasible).")
+    print("\nNote: only retailers that returned live data above are included. Any shown "
+          "as BLOCKED/0 listings are reported honestly, not substituted with fake data.")
 
 
 def main(argv=None):
