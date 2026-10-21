@@ -88,7 +88,7 @@ def _live_plan(req: PlanRequest) -> dict:
     # imported lazily so the synthetic path has no Playwright import cost
     from .live import collect_live
 
-    items, listings, retailers, engine = collect_live(
+    items, listings, retailers, engine, source_notes = collect_live(
         req.text, location=req.location, headless=True, include_blinkit=False)
     if not items:
         return {"data_source": "LIVE web UI", "parse_engine": engine,
@@ -98,7 +98,7 @@ def _live_plan(req: PlanRequest) -> dict:
         return {
             "data_source": "LIVE web UI (Amazon.in, Flipkart, Instamart) — "
                            "Blinkit omitted (needs a headed browser)",
-            "parse_engine": engine,
+            "parse_engine": engine, "source_notes": source_notes,
             "parsed_items": _parsed_items(items),
             "plan": plan_to_dict(optimize(items, [], {})),
             "note": "No live listings were obtained (sites blocked automation or "
@@ -113,6 +113,7 @@ def _live_plan(req: PlanRequest) -> dict:
                        f"(Blinkit omitted: needs a headed browser)",
         "parse_engine": engine,
         "match_engine": "AI semantic match (Ollama) + rule fallback",
+        "source_notes": source_notes,
         "parsed_items": _parsed_items(items),
         "plan": plan_to_dict(plan),
     }
@@ -148,13 +149,14 @@ _HTML = """<!doctype html><html lang="en"><head>
  <div class="sub">Enter a shopping list in plain English. The agent matches products, compares
  prices and computes the lowest-cost split across retailers.</div>
  <textarea id="t">Buy 10 Park Avenue soaps, 3 packets of cooking oil, one 10 kg rice bag, 2 detergent soaps and 2 shampoo bottles</textarea>
- <input id="city" placeholder="Delivery city (e.g. Hyderabad) — used for live quick-commerce"
+ <input id="city" placeholder="Delivery city (optional) — e.g. Hyderabad. Sets Instamart's area for city-specific prices"
    style="width:100%;margin-top:10px;background:var(--card);color:var(--ink);
    border:1px solid var(--line);border-radius:10px;padding:12px;font-size:16px">
  <label class="mut" style="display:block;margin-top:10px;font-size:14px">
    <input type="checkbox" id="live" style="vertical-align:middle">
-   Use live prices (real web UI — Amazon.in, Flipkart, Instamart; slower. Blinkit
-   needs a headed browser so it's omitted here.)
+   Use live prices (real web UI — Amazon.in, Flipkart, Instamart; slower). City is
+   optional; if given, Instamart prices are set to that area. Blinkit needs a headed
+   browser so it's omitted from the web app.
  </label>
  <button onclick="go()">Optimize my basket</button>
  <div id="out"></div>
@@ -170,6 +172,8 @@ async function go(){
  const d=await r.json(); const p=d.plan;
  let h='<div class="badge">'+(live?'● ':'⚠ ')+d.data_source+'</div>';
  if(d.parse_engine){h+='<div class="mut" style="margin:4px 0">🧠 list parsed by: '+d.parse_engine+'</div>';}
+ if(d.match_engine){h+='<div class="mut" style="margin:4px 0">🔎 '+d.match_engine+'</div>';}
+ if(d.source_notes){for(const k in d.source_notes){h+='<div class="mut" style="margin:2px 0;font-size:12px">📍 '+k+': '+d.source_notes[k]+'</div>';}}
  if(d.note){h+='<div class="mut" style="margin:6px 0">'+d.note+'</div>';}
  if(p.status!=='OPTIMAL'){h+='<div class="card">Status: '+p.status+'<br>'+(p.notes||[]).join('<br>')+'</div>';out.innerHTML=h;return;}
  h+='<div class="card"><div class="r"><div>Best plan — total payable</div><div class="tot">₹'+p.total_cost+'</div></div>';

@@ -39,14 +39,17 @@ _Concise status doc, updated as the project progresses._
 - **Amazon.in** ✅ live — reads public search results (no login needed for prices).
 - **Flipkart** ✅ live — reads public search; dismisses the login modal; ₹-anchored
   price extraction; pack size parsed from title/card.
-- **Instamart (instamart.in)** ✅ live **headless** — the standalone Instamart brand
-  domain (Swiggy dropped its name from Instamart, May-2026 rebrand). No Cloudflare and
-  no hard location wall, so it works headless. Flow: open `/search?q=`, type the query
-  into the search box + Enter (the `?q=` param alone does NOT filter — it shows a
-  default catalog), wait until results replace that catalog, then extract. Prices are
-  plain numbers (no ₹ glyph) so it uses a dedicated extractor. Serves a national/geo
-  catalog; a user-chosen city isn't applied to this source yet (it exposes a
-  "Choose area" affordance we could wire later).
+- **Instamart (instamart.in)** ✅ live **headless, city-aware** — the standalone
+  Instamart brand domain (Swiggy dropped its name, May-2026 rebrand). No Cloudflare
+  and no hard location wall. Flow: open `/search?q=`, type the query + Enter (the
+  `?q=` param alone does NOT filter), wait until results replace the default catalog,
+  then extract (prices are plain numbers, dedicated extractor). **City now applied:**
+  when a city is given we drive the "Choose area" modal (fresh throwaway profile so it
+  always starts location-less → reliable), type the city, **mouse-click** the area row
+  (obfuscated React ignores synthetic clicks), prefer the EXACT-city row (so
+  "Hyderabad" ≠ "Hyderabad Gate, Varanasi"), confirm, and record the resolved area
+  (surfaced to the UI/CLI for honesty). Verified: Hyderabad/Mumbai/Delhi/Bangalore/
+  Chennai all resolve to the correct city.
 - **Blinkit** ⛔ location-walled — SPA shows nothing until a delivery location is set;
   headless returns 0 and we report it honestly. Works **headed** with a city; often
   blocked by anti-bot regardless.
@@ -102,12 +105,17 @@ _Concise status doc, updated as the project progresses._
 - **No cart automation yet.** Interface exists; checkout always stays manual.
 - The 8B local model is occasionally over-strict in matching (may drop a valid
   variant); safe-fallback prevents dropping everything on error.
-- Amazon/Flipkart adapters still have the old `brand or name.split()[0]` stamping
-  (Instamart fixed to derive brand from the product name) — to align next.
 - `instamart.in` identity: strong circumstantial evidence it's the rebranded
   standalone Instamart; not 100% ownership-confirmed.
 
+## City / location model (current)
+- **City is OPTIONAL** overall. Amazon.in / Flipkart don't need it.
+- When given, it's applied to the quick-commerce portals: **Instamart** (headless,
+  via "Choose area") and **Blinkit** (headed only). All three adapters now derive a
+  listing's brand from the ACTUAL product name (brand matching is meaningful).
+- **Blinkit** stays CLI-`--headed` only (Cloudflare + hard location wall) — it is
+  omitted from the web app, stated plainly, never faked.
+
 ## Next step
-Align Amazon/Flipkart brand derivation with Instamart; optionally wire Instamart
-"Choose area" for true city pricing; (only where supported) a verified
-cart-preparation step.
+Optionally wire Blinkit's headed location flow into a desktop/CLI run end-to-end;
+(only where supported) a verified cart-preparation step.

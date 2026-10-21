@@ -71,7 +71,9 @@ class FlipkartAdapter(RetailerAdapter):
             unit_qty, unit = measure if measure is not None else (1.0, Unit.COUNT)
             url = href if href.startswith("http") else f"https://www.flipkart.com{href}"
             out.append(Listing(id=f"{idp}_{i}", retailer=self.name, category=category,
-                               brand=(brand or title.split(" ")[0]), name=title[:120],
+                               # brand from the ACTUAL product title (not the
+                               # requested brand — that would defeat brand matching)
+                               brand=title.split(" ")[0], name=title[:120],
                                unit=unit, unit_qty=unit_qty, price=price,
                                available=True, url=url, verified=True, source="ui"))
         return out

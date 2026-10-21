@@ -43,27 +43,31 @@ def collect_live(text: str, location: str | None = None, headless: bool = True,
                  include_blinkit: bool = False):
     """Collect real listings programmatically (for the web API).
 
-    Returns (items, listings, retailers, engine). Blinkit is excluded by default because
+    Returns (items, listings, retailers, engine, source_notes). Blinkit is excluded by default because
     it needs a headed browser (a server request can't drive one honestly). Each
     adapter failure is swallowed so one blocked site doesn't sink the whole run.
     """
     items, engine = parse_list_smart(text)
     if not items:
-        return [], [], {}, engine
+        return [], [], {}, engine, {}
     adapters = default_adapters(headless, location)
     if not include_blinkit:
         adapters = [a for a in adapters if a.name != "Blinkit"]
     all_listings: List[Listing] = []
     retailers: Dict[str, Retailer] = {}
+    source_notes: Dict[str, str] = {}
     for ad in adapters:
         try:
             found = ad.search_items(items)
+            # capabilities() is read AFTER the run so it reflects the resolved
+            # delivery area (honest about which area the prices are for)
+            source_notes[ad.name] = ad.capabilities().notes
             if found:
                 all_listings.extend(found)
                 retailers[ad.name] = ad.retailer()
-        except Exception:
-            pass
-    return items, all_listings, retailers, engine
+        except Exception as e:
+            source_notes[ad.name] = f"error: {type(e).__name__}"
+    return items, all_listings, retailers, engine, source_notes
 
 
 def run_live(text: str, location: str | None = None, headless: bool = True) -> None:
@@ -83,12 +87,13 @@ def run_live(text: str, location: str | None = None, headless: bool = True) -> N
     retailers: Dict[str, Retailer] = {}
 
     for ad in adapters:
-        caps = ad.capabilities()
-        print(f"\nAdapter {ad.name}: live={caps.live} ({caps.notes})")
+        print(f"\nAdapter {ad.name}: live={ad.capabilities().live}")
         try:
             found = ad.search_items(items)
             all_listings.extend(found)
             retailers[ad.name] = ad.retailer()
+            # read notes AFTER the run so a resolved delivery area is shown
+            print(f"  {ad.capabilities().notes}")
             print(f"  read {len(found)} live listings")
         except BotChallenge as e:
             print(f"  BLOCKED: {e}")

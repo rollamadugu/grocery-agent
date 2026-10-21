@@ -12,7 +12,10 @@ clear reason. We never fabricate listings for a site that didn't serve them.
 """
 from __future__ import annotations
 
+import contextlib
 import re
+import shutil
+import tempfile
 from typing import List, Optional, Tuple
 from urllib.parse import quote_plus
 
@@ -240,6 +243,32 @@ def _parse_instamart_card(lines: List[str]
     return name, measure, sale, sold_out
 
 
+# Area-suggestion rows in the "Choose area" modal are obfuscated React nodes that
+# ignore synthetic .click(); a real mouse click at the row's centre works. This
+# returns the on-screen centre of each candidate row (text starts with the city),
+# top-most first, so we can drive page.mouse.click(x, y).
+_INSTAMART_AREA_ROWS_JS = r"""
+(city) => {
+  const low = city.toLowerCase();
+  const out = [];
+  for (const el of document.querySelectorAll('li,div')) {
+    const t = (el.innerText || '').trim();
+    if (!t || t.length > 70) continue;
+    const first = t.split('\n')[0].trim();
+    if (!first.toLowerCase().includes(low)) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width < 40 || r.height < 10 || r.height > 80) continue;  // a row, not a container
+    out.push({ text: first.slice(0, 50), x: r.x + r.width / 2, y: r.y + r.height / 2 });
+  }
+  const seen = new Set(), uniq = [];
+  for (const o of out.sort((a, b) => a.y - b.y)) {
+    if (seen.has(o.text)) continue; seen.add(o.text); uniq.push(o);
+  }
+  return uniq.slice(0, 8);
+}
+"""
+
+
 class InstamartAdapter(RetailerAdapter):
     name = "Instamart"
     base_url = "https://instamart.in"
@@ -248,25 +277,155 @@ class InstamartAdapter(RetailerAdapter):
         "input[type='search']",
         "input[placeholder*='search' i]",
     ]
+    # the control that opens the "Choose area" modal — differs by whether a
+    # location is already set in the (persistent) profile:
+    location_trigger_selectors = [
+        "[data-testid='address-bar']",      # a location is set -> click to change it
+        "[data-testid='search-location']",  # no location yet -> "Add your location"
+        "[data-testid='DEFAULT_ADDRESS_CONTAINER']",
+    ]
+    area_input_selectors = [
+        "input[placeholder*='area' i]",
+        "input[placeholder*='street' i]",
+    ]
 
     def __init__(self, headless: bool = True, max_results: int = 8,
                  location: str | None = None):
         self.headless = headless
         self.max_results = max_results
-        # instamart.in serves a national/default catalog without prompting for a
-        # delivery location, so a user-supplied city is NOT applied for this source
-        # (kept for signature parity with the location-walled adapters).
+        # instamart.in geolocates by default but exposes a "Choose area" modal; when
+        # a city is given we set it so prices are for THAT area. If setting fails we
+        # fall back to the geo-default and say so (never fake city accuracy).
         self.location = location
+        self._resolved_area: str | None = None   # the area actually set (for honesty)
+        self._location_done = False
 
     def retailer(self) -> Retailer:
         return Retailer(self.name, delivery_fee=0.0, min_order_value=0.0, live=True)
 
     def capabilities(self) -> Capabilities:
+        note = ("instamart.in (standalone Instamart brand). Works headless; "
+                "type-to-search; prices are plain numbers. ")
+        if self.location:
+            note += (f"Delivery area set via 'Choose area' to match '{self.location}'"
+                     + (f" (resolved: {self._resolved_area})." if self._resolved_area
+                        else " (fell back to geo-default if not confirmed)."))
+        else:
+            note += "No city given -> uses the site's geo-default area."
         return Capabilities(product_search=True, price_retrieval=True, live=True,
-                            notes="instamart.in (standalone Instamart brand). Works "
-                                  "headless; type-to-search; prices are plain numbers. "
-                                  "Serves a national catalog (no city prompt), so a "
-                                  "user city is not applied here. No cart.")
+                            notes=note + " No cart.")
+
+    def _open_location_modal(self, page) -> bool:
+        for sel in self.location_trigger_selectors:
+            el = page.query_selector(sel)
+            if el:
+                try:
+                    el.click(timeout=6000)
+                    page.wait_for_timeout(2000)
+                    return True
+                except Exception:
+                    continue
+        # text fallbacks
+        for txt in ("Choose area", "Add your location", "Change"):
+            try:
+                loc = page.get_by_text(txt, exact=False).first
+                if loc.count() and loc.is_visible():
+                    loc.click(timeout=6000)
+                    page.wait_for_timeout(2000)
+                    return True
+            except Exception:
+                pass
+        return False
+
+    def _current_area(self, page) -> str | None:
+        try:
+            el = page.query_selector("[data-testid='address-line']") or \
+                 page.query_selector("[data-testid='address-bar']")
+            if el:
+                t = (el.inner_text() or "").strip().replace("\n", " ")
+                return t or None
+        except Exception:
+            pass
+        return None
+
+    def _set_location(self, page, city: str) -> bool:
+        """Open 'Choose area', type the city, mouse-click the first area suggestion,
+        confirm. Records the resolved area. Returns True if an area was set."""
+        try:
+            page.goto(self.base_url + "/", wait_until="domcontentloaded", timeout=45000)
+            page.wait_for_timeout(3500)
+            if not self._open_location_modal(page):
+                return False
+            inp = None
+            for sel in self.area_input_selectors:
+                inp = page.query_selector(sel)
+                if inp:
+                    break
+            if inp is None:
+                return False
+            inp.click()
+            inp.fill("")
+            inp.type(city, delay=80)
+            page.wait_for_timeout(4500)
+
+            rows = page.evaluate(_INSTAMART_AREA_ROWS_JS, city) or []
+            if not rows:
+                return False
+            # Prefer the row whose text is EXACTLY the city (the city-level pick,
+            # e.g. "Hyderabad") over a longer area name — a longer name can be a
+            # same-named place in a DIFFERENT city (e.g. "Hyderabad Gate" is in
+            # Varanasi). Only if there's no exact-city row do we take the top area.
+            exact = [r for r in rows if r["text"].strip().lower() == city.strip().lower()]
+            target = exact[0] if exact else rows[0]
+            page.mouse.move(target["x"], target["y"])
+            page.wait_for_timeout(300)
+            page.mouse.click(target["x"], target["y"])
+            page.wait_for_timeout(4000)
+
+            # a city-level pick may drop into a second area list; take its top row
+            if page.query_selector(self.area_input_selectors[0]):
+                rows2 = page.evaluate(_INSTAMART_AREA_ROWS_JS, city) or []
+                if rows2:
+                    t2 = rows2[0]
+                    page.mouse.move(t2["x"], t2["y"])
+                    page.wait_for_timeout(300)
+                    page.mouse.click(t2["x"], t2["y"])
+                    page.wait_for_timeout(4000)
+
+            # a map/confirm step often follows
+            for sel in ("button:has-text('Confirm')", "[data-testid*='confirm' i]",
+                        "button:has-text('Proceed')", "button:has-text('Continue')"):
+                try:
+                    b = page.locator(sel).first
+                    if b.count() and b.is_visible():
+                        b.click(timeout=6000)
+                        page.wait_for_timeout(4000)
+                        break
+                except Exception:
+                    pass
+
+            area = self._current_area(page)
+            # success if the resolved area reflects the requested city, or the
+            # "Add your location" placeholder is gone
+            if area and city.lower() in area.lower():
+                self._resolved_area = area
+                return True
+            placeholder = page.query_selector("[data-testid='DEFAULT_ADDRESS_TITLE']")
+            if placeholder is None:
+                self._resolved_area = area
+                return True
+            return False
+        except Exception:
+            return False
+
+    def _ensure_location(self, page) -> None:
+        """Set the delivery area at most once per browser session."""
+        if self._location_done or not self.location:
+            return
+        self._location_done = True
+        ok = self._set_location(page, self.location)
+        if not ok:
+            self._resolved_area = None   # couldn't confirm -> geo-default (honest)
 
     def _run_search(self, page, query: str) -> None:
         page.goto(self.search_url.format(q=quote_plus(query)),
@@ -359,14 +518,34 @@ class InstamartAdapter(RetailerAdapter):
         q = " ".join(x for x in [item.brand or "", item.category.replace("_", " ")] if x).strip()
         return q or item.text
 
+    @contextlib.contextmanager
+    def _session(self):
+        """A browser session for Instamart. When a city is requested we use a
+        FRESH, throwaway profile so the site always starts location-less and the
+        'Choose area' flow sets exactly that city (a profile that already has a
+        saved area won't reliably re-open the area picker). Instamart needs no
+        login, so a clean profile costs nothing."""
+        if self.location:
+            profile = tempfile.mkdtemp(prefix="instamart-pw-")
+            try:
+                with browser_page(headless=self.headless, profile_dir=profile) as page:
+                    yield page
+            finally:
+                shutil.rmtree(profile, ignore_errors=True)
+        else:
+            with browser_page(headless=self.headless) as page:
+                yield page
+
     def search(self, item) -> List[Listing]:
-        with browser_page(headless=self.headless) as page:
+        with self._session() as page:
+            self._ensure_location(page)
             return self._extract(page, self._q(item), item.category, item.brand or "",
                                  "instamart")
 
     def search_items(self, items) -> List[Listing]:
         out: List[Listing] = []
-        with browser_page(headless=self.headless) as page:
+        with self._session() as page:
+            self._ensure_location(page)        # set the delivery area once, up front
             for item in items:
                 out.extend(self._extract(page, self._q(item), item.category,
                                          item.brand or "", f"instamart_{item.key}"))

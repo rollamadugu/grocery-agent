@@ -122,7 +122,9 @@ class AmazonIndiaAdapter(RetailerAdapter):
             url = href if href.startswith("http") else f"https://www.amazon.in{href}"
             listings.append(Listing(
                 id=f"{idprefix}_{i}", retailer=self.name, category=category,
-                brand=(brand or title.split(" ")[0]), name=title[:120],
+                # brand from the ACTUAL product title (not the requested brand —
+                # stamping the request would silently defeat brand matching)
+                brand=title.split(" ")[0], name=title[:120],
                 unit=unit, unit_qty=unit_qty, price=price,
                 available=True, url=url, verified=True, source="ui"))
         return listings
