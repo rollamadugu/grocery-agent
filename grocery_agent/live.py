@@ -16,32 +16,68 @@ from typing import Dict, List
 
 from .models import Listing, Retailer
 from .optimizer import optimize
-from .parser import parse_list
+from .llm_parser import parse_list_smart
 from .retailers.amazon_in import AmazonIndiaAdapter
 from .retailers.flipkart import FlipkartAdapter
 from .retailers.quick_commerce import BlinkitAdapter, InstamartAdapter
 from .retailers.playwright_base import BotChallenge
 
 
-def default_adapters(headless: bool):
+def default_adapters(headless: bool, location: str | None = None):
+    """Build the live adapters.
+
+    - Amazon.in / Flipkart: work headless, not location-walled.
+    - Instamart (instamart.in): works headless; serves a national catalog, so the
+      user's city is accepted for signature parity but not applied.
+    - Blinkit: location-walled + bot-protected, so it only yields data when run
+      --headed (and uses the city to scope prices); headless it reports no data.
+    """
     return [AmazonIndiaAdapter(headless=headless, max_results=8),
             FlipkartAdapter(headless=headless, max_results=8),
-            BlinkitAdapter(headless=headless, max_results=8),
-            InstamartAdapter(headless=headless, max_results=8)]
+            BlinkitAdapter(headless=headless, max_results=8, location=location),
+            InstamartAdapter(headless=headless, max_results=8, location=location)]
 
 
-def run_live(text: str, headless: bool = True) -> None:
-    items = parse_list(text)
+def collect_live(text: str, location: str | None = None, headless: bool = True,
+                 include_blinkit: bool = False):
+    """Collect real listings programmatically (for the web API).
+
+    Returns (items, listings, retailers, engine). Blinkit is excluded by default because
+    it needs a headed browser (a server request can't drive one honestly). Each
+    adapter failure is swallowed so one blocked site doesn't sink the whole run.
+    """
+    items, engine = parse_list_smart(text)
+    if not items:
+        return [], [], {}, engine
+    adapters = default_adapters(headless, location)
+    if not include_blinkit:
+        adapters = [a for a in adapters if a.name != "Blinkit"]
+    all_listings: List[Listing] = []
+    retailers: Dict[str, Retailer] = {}
+    for ad in adapters:
+        try:
+            found = ad.search_items(items)
+            if found:
+                all_listings.extend(found)
+                retailers[ad.name] = ad.retailer()
+        except Exception:
+            pass
+    return items, all_listings, retailers, engine
+
+
+def run_live(text: str, location: str | None = None, headless: bool = True) -> None:
+    items, engine = parse_list_smart(text)
     if not items:
         print("Could not parse any items from:", text)
         return
 
-    print("Parsed list:")
+    print(f"Parsed list (engine: {engine}):")
     for it in items:
         print(f"  - {it.text}  [{it.category}, need {it.required_qty}{it.unit.value}, "
               f"{it.mode.value}{', brand=' + it.brand if it.brand else ''}]")
+    print(f"\nDelivery location: {location or '(none given — Blinkit needs one to show prices)'}")
 
-    adapters = default_adapters(headless)
+    adapters = default_adapters(headless, location)
     all_listings: List[Listing] = []
     retailers: Dict[str, Retailer] = {}
 
@@ -88,10 +124,31 @@ def main(argv=None):
     if "--headed" in argv:
         headless = False
         argv.remove("--headed")
+
+    # --location "City" (or --location=City): scopes Blinkit (and is noted for
+    # Instamart). Everything else is the shopping list.
+    location = None
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--location":
+            if i + 1 < len(argv):
+                location = argv[i + 1]
+                del argv[i:i + 2]
+                continue
+            del argv[i]
+            continue
+        if a.startswith("--location="):
+            location = a.split("=", 1)[1]
+            del argv[i]
+            continue
+        i += 1
+
     if not argv:
-        print('usage: python -m grocery_agent.live [--headed] "<shopping list>"')
+        print('usage: python -m grocery_agent.live [--headed] [--location "City"] '
+              '"<shopping list>"')
         return
-    run_live(" ".join(argv), headless=headless)
+    run_live(" ".join(argv), location=location, headless=headless)
 
 
 if __name__ == "__main__":

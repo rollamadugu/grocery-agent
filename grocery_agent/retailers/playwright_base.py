@@ -162,7 +162,7 @@ _SCAN_JS = r"""
     let href = '';
     const a = el.closest('a') || el.querySelector('a');
     if (a) href = a.href || '';
-    out.push({ title, price: m[1], href });
+    out.push({ title, price: m[1], href, text: txt });
   }
   return out.slice(0, 80);
 }

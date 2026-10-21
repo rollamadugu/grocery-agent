@@ -39,21 +39,51 @@ _Concise status doc, updated as the project progresses._
 - **Amazon.in** ✅ live — reads public search results (no login needed for prices).
 - **Flipkart** ✅ live — reads public search; dismisses the login modal; ₹-anchored
   price extraction; pack size parsed from title/card.
+- **Instamart (instamart.in)** ✅ live **headless** — the standalone Instamart brand
+  domain (Swiggy dropped its name from Instamart, May-2026 rebrand). No Cloudflare and
+  no hard location wall, so it works headless. Flow: open `/search?q=`, type the query
+  into the search box + Enter (the `?q=` param alone does NOT filter — it shows a
+  default catalog), wait until results replace that catalog, then extract. Prices are
+  plain numbers (no ₹ glyph) so it uses a dedicated extractor. Serves a national/geo
+  catalog; a user-chosen city isn't applied to this source yet (it exposes a
+  "Choose area" affordance we could wire later).
 - **Blinkit** ⛔ location-walled — SPA shows nothing until a delivery location is set;
-  headless returns 0 and we report it honestly. May work **headed** once you set the
-  location; often blocked by anti-bot regardless.
-- **Instamart (Swiggy)** ⛔ location/login-walled — same story; 0 in headless, honest.
-- A real multi-retailer *split* now works across the portals that return data
-  (Amazon + Flipkart today).
+  headless returns 0 and we report it honestly. Works **headed** with a city; often
+  blocked by anti-bot regardless.
+- **(old) Swiggy `swiggy.com/instamart`** ⛔ Cloudflare + location wall in headless —
+  replaced by the `instamart.in` adapter above.
+- A real multi-retailer *split* now works across Amazon + Flipkart + Instamart.
+
+## Done (Phase 3 — local AI for the fuzzy parts)
+- **AI list parser** (`llm_parser.py`): a LOCAL LLM (Ollama `llama3.1:8b`) turns free
+  text into the same `ShoppingItem` structures — robust to anything outside the rule
+  parser's fixed dictionary (e.g. "toor dal", arbitrary brands). Temperature 0 +
+  JSON-constrained; runs entirely locally (no external API). **Falls back** to the
+  rule parser if Ollama is down and the response **labels which engine ran**.
+- **Where AI is / isn't used (by design):** AI for NL parsing (and, next, semantic
+  matching); the **MILP optimizer stays deterministic** (provably optimal, instant —
+  an LLM there would be worse, not smarter).
+- Wired into the live CLI (`--location`, engine printed) and the web API live path.
+- **VERIFIED:** "1 kg toor dal, 1 kg rice" (previously UNPARSEABLE) now → AI parse →
+  real Instamart listings → optimal plan Rs 258 (Fortune Arhar Dal + Daawat rice),
+  all `verified=True`.
+
+## CLI / UI
+- CLI: `python -m grocery_agent.live [--headed] [--location "City"] "<list>"`.
+- Web UI: shopping list + **delivery city** field + **"use live prices"** toggle.
+  Live mode runs Amazon/Flipkart/Instamart headless (Blinkit omitted — needs a headed
+  browser; stated plainly). Synthetic demo path stays on the rule parser + fixtures.
 
 ## Honest limitations / not done
 - Amazon search doesn't expose delivery/coupon economics reliably, so that
   retailer's basket fees are conservative/approximate until read from a real cart.
 - **No cart automation yet.** Interface exists; checkout always stays manual.
-- Parser is rule-based; AI assist for ambiguous matches is a future seam (could use
-  local Ollama).
+- **Semantic matching is still rule/string-based** — the next AI seam (let the LLM
+  judge "Arhar = Toor", right variant/size, real brand from the product name instead
+  of a stamped field). Live adapters currently derive brand from the product name.
+- `instamart.in` identity: strong circumstantial evidence it's the rebranded
+  standalone Instamart; not 100% ownership-confirmed.
 
 ## Next step
-Add a second live adapter (BigBasket or Flipkart web) behind the same seam;
-empirically record which portals cooperate vs. block. Then (only where supported)
-a verified cart-preparation step.
+LLM semantic matcher (brand/variant/synonym-aware) behind the existing `matching.py`
+seam, with rule-based fallback; then optionally wire Instamart "Choose area".

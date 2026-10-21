@@ -24,6 +24,8 @@ app = FastAPI(title="Smart Grocery Agent", version="0.1.0")
 
 class PlanRequest(BaseModel):
     text: str
+    location: str | None = None     # delivery city (used by live quick-commerce)
+    live: bool = False              # True -> read real web-UI prices (slower)
 
 
 def plan_to_dict(plan: Plan) -> dict:
@@ -57,18 +59,58 @@ def plan_to_dict(plan: Plan) -> dict:
 
 @app.post("/api/plan")
 def make_plan(req: PlanRequest) -> dict:
+    if req.live:
+        return _live_plan(req)
+
     items = parse_list(req.text)
     listings = sample_listings()
     retailers = sample_retailers()
     plan = optimize(items, listings, retailers)
     return {
         "data_source": "synthetic (dev fixtures) — NOT live retailer prices",
-        "parsed_items": [
-            {"key": it.key, "text": it.text, "category": it.category,
+        "parsed_items": _parsed_items(items),
+        "plan": plan_to_dict(plan),
+    }
+
+
+def _parsed_items(items) -> list:
+    return [{"key": it.key, "text": it.text, "category": it.category,
              "unit": it.unit.value, "required_qty": it.required_qty,
-             "mode": it.mode.value, "brand": it.brand}
-            for it in items
-        ],
+             "mode": it.mode.value, "brand": it.brand} for it in items]
+
+
+def _live_plan(req: PlanRequest) -> dict:
+    """Run real, headless web-UI adapters (Amazon.in, Flipkart, Instamart) and
+    optimize over what they actually return. Blinkit is omitted here because it
+    needs a headed browser + delivery location, which a web request cannot drive
+    honestly — that's stated plainly, never faked. This call is SLOW (it drives
+    real browsers) and runs in FastAPI's threadpool (sync endpoint)."""
+    # imported lazily so the synthetic path has no Playwright import cost
+    from .live import collect_live
+
+    items, listings, retailers, engine = collect_live(
+        req.text, location=req.location, headless=True, include_blinkit=False)
+    if not items:
+        return {"data_source": "LIVE web UI", "parse_engine": engine,
+                "parsed_items": [], "plan": plan_to_dict(optimize([], [], {})),
+                "note": f"Could not parse any items from: {req.text}"}
+    if not listings:
+        return {
+            "data_source": "LIVE web UI (Amazon.in, Flipkart, Instamart) — "
+                           "Blinkit omitted (needs a headed browser)",
+            "parse_engine": engine,
+            "parsed_items": _parsed_items(items),
+            "plan": plan_to_dict(optimize(items, [], {})),
+            "note": "No live listings were obtained (sites blocked automation or "
+                    "returned nothing). Nothing is substituted with fake data.",
+        }
+    plan = optimize(items, listings, retailers)
+    srcs = ", ".join(sorted(retailers)) or "none"
+    return {
+        "data_source": f"LIVE web UI — real prices from: {srcs} "
+                       f"(Blinkit omitted: needs a headed browser)",
+        "parse_engine": engine,
+        "parsed_items": _parsed_items(items),
         "plan": plan_to_dict(plan),
     }
 
@@ -103,16 +145,29 @@ _HTML = """<!doctype html><html lang="en"><head>
  <div class="sub">Enter a shopping list in plain English. The agent matches products, compares
  prices and computes the lowest-cost split across retailers.</div>
  <textarea id="t">Buy 10 Park Avenue soaps, 3 packets of cooking oil, one 10 kg rice bag, 2 detergent soaps and 2 shampoo bottles</textarea>
+ <input id="city" placeholder="Delivery city (e.g. Hyderabad) — used for live quick-commerce"
+   style="width:100%;margin-top:10px;background:var(--card);color:var(--ink);
+   border:1px solid var(--line);border-radius:10px;padding:12px;font-size:16px">
+ <label class="mut" style="display:block;margin-top:10px;font-size:14px">
+   <input type="checkbox" id="live" style="vertical-align:middle">
+   Use live prices (real web UI — Amazon.in, Flipkart, Instamart; slower. Blinkit
+   needs a headed browser so it's omitted here.)
+ </label>
  <button onclick="go()">Optimize my basket</button>
  <div id="out"></div>
 </div>
 <script>
 async function go(){
- const out=document.getElementById('out'); out.innerHTML='<p class="mut">Optimizing…</p>';
+ const out=document.getElementById('out');
+ const live=document.getElementById('live').checked;
+ out.innerHTML='<p class="mut">'+(live?'Reading live prices — this can take up to a minute…':'Optimizing…')+'</p>';
  const r=await fetch('/api/plan',{method:'POST',headers:{'Content-Type':'application/json'},
-   body:JSON.stringify({text:document.getElementById('t').value})});
+   body:JSON.stringify({text:document.getElementById('t').value,
+     location:document.getElementById('city').value||null, live:live})});
  const d=await r.json(); const p=d.plan;
- let h='<div class="badge">⚠ '+d.data_source+'</div>';
+ let h='<div class="badge">'+(live?'● ':'⚠ ')+d.data_source+'</div>';
+ if(d.parse_engine){h+='<div class="mut" style="margin:4px 0">🧠 list parsed by: '+d.parse_engine+'</div>';}
+ if(d.note){h+='<div class="mut" style="margin:6px 0">'+d.note+'</div>';}
  if(p.status!=='OPTIMAL'){h+='<div class="card">Status: '+p.status+'<br>'+(p.notes||[]).join('<br>')+'</div>';out.innerHTML=h;return;}
  h+='<div class="card"><div class="r"><div>Total payable</div><div class="tot">₹'+p.total_cost+'</div></div>';
  if(p.savings_vs_best_single>0){h+='<div class="save">Saves ₹'+p.savings_vs_best_single+' vs the cheapest single retailer</div>';}
