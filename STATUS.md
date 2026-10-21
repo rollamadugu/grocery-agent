@@ -74,16 +74,40 @@ _Concise status doc, updated as the project progresses._
   Live mode runs Amazon/Flipkart/Instamart headless (Blinkit omitted — needs a headed
   browser; stated plainly). Synthetic demo path stays on the rule parser + fixtures.
 
+## Done (Phase 4 — AI semantic matching + buy-vs-compare UI)
+- **AI semantic matcher** (`llm_matcher.py`): `llm_candidates(item, listings)` runs
+  the rule-based candidates first (availability/dimension/brand/price-cap), then a
+  single batched local-LLM call judges which candidate NAMES are genuinely the
+  requested product. This is essential because live adapters stamp the requested
+  category onto listings, so without it a "toor dal" search would accept moong/
+  masoor/chana. **Verified:** it drops non-dal junk (e.g. "Switch") a search returns.
+  Fails safe: on an LLM error it keeps the rule-based set; a genuine empty verdict is
+  trusted (the item is flagged, never substituted with the wrong product).
+- **Optimizer** now takes a pluggable `matcher=` (default rule-based, so the synthetic
+  demo + 22 tests are unchanged) and a `drop_unmatched=` flag used by live paths:
+  items with no genuine match are left out WITH A NOTE instead of failing the whole
+  plan or being faked.
+- **Buy-vs-compare UI**: the result now shows (1) the **smart split** — exactly what
+  to buy from each portal with qty, per-pack price, unit price and basket total; and
+  (2) a **"whole list at one portal"** comparison — what the same full list would cost
+  at each single portal (or "cannot supply every item"), the cheapest single, and how
+  much the smart split **saves**. Also surfaces the parse + match engine labels.
+- **Verified end-to-end (live, Hyderabad):** "1 kg rice, 1 L cooking oil" → smart
+  split Amazon rice Rs137 + Instamart oil Rs173 = Rs310, **saves Rs32** vs Amazon's
+  whole-basket Rs342 (Flipkart/Instamart honestly "cannot supply all").
+
 ## Honest limitations / not done
 - Amazon search doesn't expose delivery/coupon economics reliably, so that
   retailer's basket fees are conservative/approximate until read from a real cart.
 - **No cart automation yet.** Interface exists; checkout always stays manual.
-- **Semantic matching is still rule/string-based** — the next AI seam (let the LLM
-  judge "Arhar = Toor", right variant/size, real brand from the product name instead
-  of a stamped field). Live adapters currently derive brand from the product name.
+- The 8B local model is occasionally over-strict in matching (may drop a valid
+  variant); safe-fallback prevents dropping everything on error.
+- Amazon/Flipkart adapters still have the old `brand or name.split()[0]` stamping
+  (Instamart fixed to derive brand from the product name) — to align next.
 - `instamart.in` identity: strong circumstantial evidence it's the rebranded
   standalone Instamart; not 100% ownership-confirmed.
 
 ## Next step
-LLM semantic matcher (brand/variant/synonym-aware) behind the existing `matching.py`
-seam, with rule-based fallback; then optionally wire Instamart "Choose area".
+Align Amazon/Flipkart brand derivation with Instamart; optionally wire Instamart
+"Choose area" for true city pricing; (only where supported) a verified
+cart-preparation step.

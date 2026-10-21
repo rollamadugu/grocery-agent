@@ -104,12 +104,15 @@ def _live_plan(req: PlanRequest) -> dict:
             "note": "No live listings were obtained (sites blocked automation or "
                     "returned nothing). Nothing is substituted with fake data.",
         }
-    plan = optimize(items, listings, retailers)
+    from .llm_matcher import llm_candidates
+    plan = optimize(items, listings, retailers, matcher=llm_candidates,
+                    drop_unmatched=True)
     srcs = ", ".join(sorted(retailers)) or "none"
     return {
         "data_source": f"LIVE web UI — real prices from: {srcs} "
                        f"(Blinkit omitted: needs a headed browser)",
         "parse_engine": engine,
+        "match_engine": "AI semantic match (Ollama) + rule fallback",
         "parsed_items": _parsed_items(items),
         "plan": plan_to_dict(plan),
     }
@@ -169,18 +172,43 @@ async function go(){
  if(d.parse_engine){h+='<div class="mut" style="margin:4px 0">🧠 list parsed by: '+d.parse_engine+'</div>';}
  if(d.note){h+='<div class="mut" style="margin:6px 0">'+d.note+'</div>';}
  if(p.status!=='OPTIMAL'){h+='<div class="card">Status: '+p.status+'<br>'+(p.notes||[]).join('<br>')+'</div>';out.innerHTML=h;return;}
- h+='<div class="card"><div class="r"><div>Total payable</div><div class="tot">₹'+p.total_cost+'</div></div>';
- if(p.savings_vs_best_single>0){h+='<div class="save">Saves ₹'+p.savings_vs_best_single+' vs the cheapest single retailer</div>';}
+ h+='<div class="card"><div class="r"><div>Best plan — total payable</div><div class="tot">₹'+p.total_cost+'</div></div>';
+ if(p.baskets.length>1){h+='<div class="mut">Smart split across '+p.baskets.length+' portals</div>';}
+ if(p.savings_vs_best_single>0){h+='<div class="save">You save ₹'+p.savings_vs_best_single+' vs buying everything from one portal</div>';}
  if(p.notes&&p.notes.length){h+='<div class="mut" style="margin-top:6px">'+p.notes.join('<br>')+'</div>';}
  h+='</div>';
+
+ // --- the optimized split: what to buy from each portal ---
+ h+='<h3 style="margin:16px 0 4px">🧺 Buy this from each portal</h3>';
  for(const b of p.baskets){
   h+='<div class="card"><div class="r"><b>'+b.retailer+'</b><b>₹'+b.total+'</b></div>';
   for(const it of b.items){
-   h+='<div class="it"><div class="r"><div>'+it.packs+' × '+it.brand+' <span class="mut">('+it.name+')</span></div><div>₹'+it.cost+'</div></div>'+
-      '<div class="mut">₹'+it.price_each+' each · unit ₹'+it.unit_price+'</div></div>';
+   h+='<div class="it"><div class="r"><div>'+it.packs+' × '+it.name+'</div><div>₹'+it.cost+'</div></div>'+
+      '<div class="mut">'+it.brand+' · ₹'+it.price_each+' each · ₹'+it.unit_price+'/unit</div></div>';
   }
   h+='<div class="it mut">items ₹'+b.item_subtotal+' + delivery ₹'+b.delivery_fee+
-     ' + fee ₹'+b.platform_fee+' − coupon ₹'+b.coupon_discount+'</div></div>';
+     ' + fee ₹'+b.platform_fee+' − coupon ₹'+b.coupon_discount+' = <b>₹'+b.total+'</b></div></div>';
+ }
+
+ // --- side-by-side: same full basket at each portal vs the smart split ---
+ const base=p.baseline_single_retailer||{};
+ const singles=Object.keys(base);
+ if(singles.length){
+  const vals=singles.map(r=>base[r]).filter(v=>v!=null);
+  const cheapest=vals.length?Math.min.apply(null,vals):null;
+  h+='<h3 style="margin:16px 0 4px">📊 Compare — whole list at one portal</h3>';
+  h+='<div class="card">';
+  for(const r of singles){
+   const v=base[r];
+   if(v==null){h+='<div class="it"><div class="r"><div>'+r+'</div><div class="mut">cannot supply every item</div></div></div>';continue;}
+   const best=(v===cheapest);
+   const diff=Math.round((v-p.total_cost)*100)/100;
+   h+='<div class="it"><div class="r"><div>'+r+(best?' <span class="mut">(cheapest single)</span>':'')+
+      '</div><div'+(best?' style="color:#ffcf6b"':'')+'>₹'+v+'</div></div>'+
+      (diff>0?'<div class="mut">₹'+diff+' more than the smart split</div>':'')+'</div>';
+  }
+  h+='<div class="it"><div class="r"><b>✅ Smart split (best)</b><b class="tot" style="font-size:16px">₹'+p.total_cost+'</b></div></div>';
+  h+='</div>';
  }
  out.innerHTML=h;
 }

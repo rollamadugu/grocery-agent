@@ -25,24 +25,36 @@ from .models import (Assignment, Listing, Plan, Retailer, RetailerBasket,
 from .pricing import packs_needed, retailer_charges, meets_min_order
 
 
-def _candidate_map(items, listings):
-    """item_key -> list of candidate listings (per the matching engine)."""
+def _candidate_map(items, listings, matcher=candidates):
+    """item_key -> list of candidate listings (per the matching engine).
+
+    `matcher(item, listings) -> list[(Listing, MatchResult)]` is pluggable so a
+    semantic (LLM) matcher can replace the default rule-based one without
+    changing the optimization."""
     cmap = {}
     for it in items:
-        cmap[it.key] = [lst for lst, _res in candidates(it, listings)]
+        cmap[it.key] = [lst for lst, _res in matcher(it, listings)]
     return cmap
 
 
 def optimize(items: List[ShoppingItem], listings: List[Listing],
-             retailers: Dict[str, Retailer]) -> Plan:
-    cmap = _candidate_map(items, listings)
+             retailers: Dict[str, Retailer], matcher=candidates,
+             drop_unmatched: bool = False) -> Plan:
+    cmap = _candidate_map(items, listings, matcher)
     notes: List[str] = []
 
     # feasibility pre-check: every item needs at least one candidate
-    for it in items:
-        if not cmap[it.key]:
-            return Plan(baskets=[], status="INFEASIBLE", total_cost=0.0,
-                        notes=[f"No available listing can satisfy '{it.text}'."])
+    missing = [it for it in items if not cmap[it.key]]
+    if missing and not drop_unmatched:
+        return Plan(baskets=[], status="INFEASIBLE", total_cost=0.0,
+                    notes=[f"No available listing can satisfy '{missing[0].text}'."])
+    if missing:  # drop_unmatched: price what matched, flag the rest honestly
+        for it in missing:
+            notes.append(f"No genuine match found for '{it.text}' on the live "
+                         f"portals — left out of the plan (not substituted).")
+        items = [it for it in items if cmap[it.key]]
+        if not items:
+            return Plan(baskets=[], status="INFEASIBLE", total_cost=0.0, notes=notes)
 
     by_id = {l.id: l for l in listings}
     listings_at = {r: [l for l in listings if l.retailer == r] for r in retailers}

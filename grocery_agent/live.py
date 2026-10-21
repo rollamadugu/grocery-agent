@@ -17,6 +17,7 @@ from typing import Dict, List
 from .models import Listing, Retailer
 from .optimizer import optimize
 from .llm_parser import parse_list_smart
+from .llm_matcher import llm_candidates
 from .retailers.amazon_in import AmazonIndiaAdapter
 from .retailers.flipkart import FlipkartAdapter
 from .retailers.quick_commerce import BlinkitAdapter, InstamartAdapter
@@ -99,7 +100,8 @@ def run_live(text: str, location: str | None = None, headless: bool = True) -> N
               "Try --headed to solve challenges, or add more adapters.")
         return
 
-    plan = optimize(items, all_listings, retailers)
+    plan = optimize(items, all_listings, retailers, matcher=llm_candidates,
+                    drop_unmatched=True)
     print(f"\n=== PLAN ({plan.status}) — data: LIVE web UI ===")
     if plan.status != "OPTIMAL":
         for n in plan.notes:
