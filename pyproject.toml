@@ -20,3 +20,4 @@ packages = ["grocery_agent", "grocery_agent.retailers"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
